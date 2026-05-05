@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+pymilvus
+
+langchain
+langchain-community
+
+sentence-transformers
+pypdf
+
+ollama
+python-multipart

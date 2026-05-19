@@ -27,7 +27,7 @@ connections.connect(
 # LOAD EMBEDDING MODEL
 # -----------------------------
 embedding_model = SentenceTransformer(
-    "all-MiniLM-L6-v2"
+    "BAAI/bge-base-en-v1.5"
 )
 
 # -----------------------------
@@ -61,34 +61,95 @@ for file in os.listdir(data_folder):
 print(f"\nTotal pages loaded: {len(documents)}")
 
 # -----------------------------
-# SPLIT INTO CHUNKS
+# SPLIT INTO PARENT CHUNKS
 # -----------------------------
-splitter = RecursiveCharacterTextSplitter(
+parent_splitter = RecursiveCharacterTextSplitter(
     chunk_size=500,
     chunk_overlap=50
 )
 
-docs = splitter.split_documents(documents)
+parent_docs = parent_splitter.split_documents(documents)
 
-print(f"Total chunks created: {len(docs)}")
+print(f"Total parent chunks created: {len(parent_docs)}")
+
+# -----------------------------
+# SPLIT INTO CHILD CHUNKS
+# -----------------------------
+child_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=100,
+    chunk_overlap=10
+)
+
+child_docs = []
+
+for parent_id, parent_doc in enumerate(parent_docs):
+
+    children = child_splitter.create_documents(
+        [parent_doc.page_content],
+        metadatas=[parent_doc.metadata]
+    )
+
+    for child in children:
+
+        child.metadata["parent_id"] = parent_id
+
+        child.metadata["parent_text"] = (
+            parent_doc.page_content
+        )
+
+        child.metadata["source"] = (
+            parent_doc.metadata["source"]
+        )
+
+        child.metadata["page"] = (
+            parent_doc.metadata["page"]
+        )
+
+        child_docs.append(child)
+
+print(
+    f"Total child chunks: {len(child_docs)}"
+)
 
 # -----------------------------
 # PREPARE TEXTS
 # -----------------------------
-texts = [
-    doc.page_content
-    for doc in docs
-]
+texts = []
 
-sources = [
-    doc.metadata["source"]
-    for doc in docs
-]
+parent_texts = []
 
-pages = [
-    doc.metadata["page"]
-    for doc in docs
-]
+sources = []
+
+pages = []
+
+parent_ids = []
+
+for doc in child_docs:
+
+    texts.append(
+        doc.page_content
+    )
+
+    parent_texts.append(
+        doc.metadata["parent_text"]
+    )
+
+    sources.append(
+        doc.metadata["source"]
+    )
+
+    page = doc.metadata.get(
+        "page",
+        0
+    )
+
+    pages.append(
+        int(page)
+    )
+
+    parent_ids.append(
+        int(doc.metadata["parent_id"])
+    )
 
 # -----------------------------
 # GENERATE EMBEDDINGS
@@ -135,6 +196,12 @@ fields = [
     ),
 
     FieldSchema(
+        name="parent_text",
+        dtype=DataType.VARCHAR,
+        max_length=10000
+    ),
+
+    FieldSchema(
         name="source",
         dtype=DataType.VARCHAR,
         max_length=500
@@ -146,9 +213,14 @@ fields = [
     ),
 
     FieldSchema(
+        name="parent_id",
+        dtype=DataType.INT64
+    ),
+
+    FieldSchema(
         name="embedding",
         dtype=DataType.FLOAT_VECTOR,
-        dim=384
+        dim=768
     )
 ]
 
@@ -172,12 +244,41 @@ print("\nInserting data into Milvus...")
 
 data = [
     texts,
+    parent_texts,
     sources,
     pages,
+    parent_ids,
     embeddings
 ]
 
-collection.insert(data)
+batch_size = 1000
+
+total = len(texts)
+
+for start in range(0, total, batch_size):
+
+    end = start + batch_size
+
+    batch_data = [
+
+        texts[start:end],
+
+        parent_texts[start:end],
+
+        sources[start:end],
+
+        pages[start:end],
+
+        parent_ids[start:end],
+
+        embeddings[start:end]
+    ]
+
+    collection.insert(batch_data)
+
+    print(
+        f"Inserted {end}/{total}"
+    )
 
 print("Data inserted!")
 

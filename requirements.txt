@@ -10,3 +10,5 @@ pypdf
 
 ollama
 python-multipart
+
+rank-bm25
